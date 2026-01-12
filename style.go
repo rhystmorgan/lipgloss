@@ -70,6 +70,12 @@ const (
 	borderBottomBackgroundKey
 	borderLeftBackgroundKey
 
+	// Border Decoration
+	borderTopDecorationKey
+	borderBottomDecorationKey
+	borderRightDecorationKey
+	borderLeftDecorationKey
+
 	inlineKey
 	maxWidthKey
 	maxHeightKey
@@ -152,6 +158,11 @@ type Style struct {
 	borderRightBgColor  TerminalColor
 	borderBottomBgColor TerminalColor
 	borderLeftBgColor   TerminalColor
+
+	borderTopFunc       []interface{}
+	borderBottomFunc []interface{}
+	borderLeftFunc     []interface{}
+	borderRightFunc   []interface{}
 
 	maxWidth  int
 	maxHeight int
