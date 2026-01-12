@@ -1,4 +1,6 @@
-module github.com/charmbracelet/lipgloss
+module github.com/rhystmorgan/lipgloss
+
+// this a fork of the original by charmbracelet to include a pr that the had idle since 24
 
 retract v0.7.0 // v0.7.0 introduces a bug that causes some apps to freeze.
 
