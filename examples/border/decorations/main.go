@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-
 	"lipgloss"
+	"os"
 )
 
 func main() {
@@ -60,4 +60,5 @@ func main() {
 	fmt.Println()
 	fmt.Println(t)
 	fmt.Println()
+
 }

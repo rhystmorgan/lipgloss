@@ -525,6 +525,9 @@ func (s Style) applyBorder(str string) string {
 				border.TopRight,
 				topFuncs,
 				width,
+				topFG,
+				topBG,
+				s.styleBorder,
 			)
 		} else {
 			top = renderHorizontalEdge(
@@ -611,6 +614,9 @@ func (s Style) applyBorder(str string) string {
 				border.BottomRight,
 				bottomFuncs,
 				width,
+				bottomFG,
+				bottomBG,
+				s.styleBorder,
 			)
 		} else {
 			bottom = renderHorizontalEdge(border.BottomLeft, border.Bottom, border.BottomRight, width)
@@ -723,64 +729,85 @@ func renderVerticalEdge(edge []string, middle string, bFuncs []interface{}) []st
 	return edge
 }
 
-// Render the horizontal (top or bottom) portion of a border.
-func renderAnnotatedHorizontalEdge(left, middle, right string, bFuncs []interface{}, width int) string {
+func renderAnnotatedHorizontalEdge(
+	left, middle, right string,
+	bFuncs []interface{},
+	width int,
+	borderFG, borderBG TerminalColor,
+	styleBorderFunc func(string, TerminalColor, TerminalColor) string,
+) string {
 	if middle == "" {
 		middle = " "
 	}
 
-	//	leftWidth := ansi.StringWidth(left)
-	//	rightWidth := ansi.StringWidth(right)
-
-	ts := make([]string, 3)
-	ws := make([]int, 3)
-
-	// get the decoration strings and truncate to fit within
-	// the width.
-	{
-		for i, f := range bFuncs {
-			if f == nil {
-				continue
-			}
-			switch f := f.(type) {
-			case string:
-				ts[i] = f
-			case func() string:
-				ts[i] = f()
-			case func(int, string) string:
-				ts[i] = f(width, middle)
-			}
-			ws[i] = ansi.StringWidth(ts[i])
+	//Extract decoration content
+	decorations := make([]string, 3)
+	for i, f := range bFuncs {
+		if f == nil {
+			continue
 		}
-		ws[0], ws[1], ws[2] = truncateWidths(ws[0], ws[1], ws[2], width)
-		for i := range ts {
-			ts[i] = ansi.Truncate(ts[i], ws[i], "")
+		switch f := f.(type) {
+		case string:
+			decorations[i] = f
+		case func() string:
+			decorations[i] = f()
+		case func(int, string) string:
+			decorations[i] = f(width, middle)
 		}
 	}
 
-	runes := []rune(middle)
-	j := 0
+	leftDecor := decorations[0]
+	centerDecor := decorations[1]
+	rightDecor := decorations[2]
 
-	out := strings.Builder{}
-	out.WriteString(left)
-	out.WriteString(ts[0])
+	// Calculate visual widths
+	leftWidth := ansi.StringWidth(leftDecor)
+	centerWidth := ansi.StringWidth(centerDecor)
+	rightWidth := ansi.StringWidth(rightDecor)
 
-	for i := ws[0]; i < width-ws[2]; {
-		if ws[1] > 0 && i == (width-ws[1])/2 {
-			out.WriteString(ts[1])
-			i += ws[1]
-		}
-		out.WriteRune(runes[j])
-		j++
-		if j >= len(runes) {
-			j = 0
-		}
-		i += ansi.StringWidth(string(runes[j]))
+	// Calculate positions
+	// Position 0: left corner
+	// Position width-1: right corner
+	// Left decoration: positions [1, leftWidth]
+	// Center decoration: positions [centerStart, centerStart + centerWidth]
+	// Right decoration: positions [width-1-rightWidth, width-1)
+	centerStart := (width - centerWidth) / 2
+	rightStart := width - 1 - rightWidth
+	middleRune := []rune(middle)[0]
+
+	var result strings.Builder
+
+	// Position 0: left corner
+	result.WriteString(styleBorderFunc(left, borderFG, borderBG))
+
+	// Left decoration
+	if leftWidth > 0 {
+		result.WriteString(leftDecor)
 	}
-	out.WriteString(ts[2])
-	out.WriteString(right)
 
-	return out.String()
+	// Middle section from after left decoration to center decoration
+	for i := leftWidth; i < centerStart; i++ {
+		result.WriteString(styleBorderFunc(string(middleRune), borderFG, borderBG))
+	}
+
+	// Center decoration (render as-is, don't modify styling)
+	if centerWidth > 0 {
+		result.WriteString(centerDecor)
+	}
+
+	// Middle section from after center decoration to right decoration
+	for i := centerStart + centerWidth; i <= rightStart; i++ {
+		result.WriteString(styleBorderFunc(string(middleRune), borderFG, borderBG))
+	}
+
+	// Right decoration
+	if rightWidth > 0 {
+		result.WriteString(rightDecor)
+	}
+
+	// Position width-1: right corner
+	result.WriteString(styleBorderFunc(right, borderFG, borderBG))
+	return result.String()
 }
 
 // Render the horizontal (top or bottom) portion of a border.
@@ -850,72 +877,38 @@ func getFirstRuneAsString(str string) string {
 	return str[:size]
 }
 
-// splitStyledString wraps a string to lines of width 1.
-// If there are styles they copied to each line.
-// Style support is very simple and assumes a single style is applied
-// to the entire string. Internal styles are stripped.
+// Alternative: Split styled string character by character, preserving ANSI codes
 func splitStyledString(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+
 	x := ansi.Strip(s)
 	if x == s {
-		// string has no styles so can just split it.
+		// No styles, just split into characters
 		return strings.Split(s, "")
 	}
 
-	lines := strings.Split(ansi.Wrap(s, 1, ""), "\n")
-
-	{
-		// temporary until ansi.Wrap is fixed.
-		//
-		// ansi.Wrap has issues wrapping a limit of 1
-		// this is to split the 2 characters
-		//
-
-		allLines := make([]string, len(x)*2)
-		n := 0
-		for i := range lines {
-			line := ansi.Strip(lines[i])
-			if len(line) == 0 {
-				// there was a trailing \n with possible styles
-				// so append the to last item
-				if n > 0 {
-					allLines[n-1] += lines[i]
-				}
-				continue
-			}
-			if len(line) == 1 {
-				allLines[n] = lines[i]
-				n++
-				continue
-			}
-			if line == lines[i] { // no styles
-				allLines[n] = line[:1]
-				allLines[n+1] = line[1:]
-				n += 2
-				continue
-			}
-			j := strings.Index(lines[i], line)
-			allLines[n] = lines[i][:j+1]
-			allLines[n+1] = lines[i][j+1:]
-			n += 2
-		}
-		lines = allLines[:n]
-	}
-
+	// For styled strings, we need to wrap each character with its ansi codes
+	// extract the prefix
 	prefix := ""
-	if i := strings.Index(lines[0], ansi.Strip(lines[0])); i > 0 {
-		prefix = lines[0][:i]
-		lines[0] = lines[0][i:]
+	if i := strings.Index(s, x); i > 0 {
+		prefix = s[:i]
+		s = s[i:]
 	}
 
+	// Extract the suffix
 	suffix := ""
-	n := len(lines) - 1
-	if i := len(ansi.Strip(lines[n])); i < len(lines[n]) {
-		suffix = lines[n][i:]
-		lines[n] = lines[n][:i]
+	if i := strings.Index(s, x); i > 0 {
+		suffix = s[i:]
+		s = s[i:]
 	}
 
-	for i := range lines {
-		lines[i] = prefix + ansi.Strip(lines[i]) + suffix
+	// each character gets: prefix b char - suffix
+	result := make([]string, len(x))
+	for i, r := range x {
+		result[i] = prefix + string(r) + suffix
 	}
-	return lines
+
+	return result
 }
